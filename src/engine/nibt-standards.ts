@@ -3,21 +3,14 @@
  * Tabelle di riferimento e costanti ingegneristiche
  */
 
-// Serie normalizzata di taglie per protezioni (Fusibili Diazed/NH e Interruttori Magnetotermici MCB/MCCB)
 export const STANDARD_PROTECTION_RATINGS_A = [
   16, 20, 25, 32, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000
 ];
 
-// Serie normalizzata sezioni conduttori (mm²)
 export const STANDARD_CABLE_SECTIONS_MM2 = [
   1.5, 2.5, 4, 6, 10, 16, 25, 35, 50, 70, 95, 120, 150, 185, 240, 300
 ];
 
-/**
- * Portata di corrente ammissibile Iz (A) per conduttori RAME (Cu), isolamento XLPE (90°C),
- * 3 conduttori caricati (trifase), temperatura ambiente 30°C in aria.
- * Conforme NIBT Tabella 5.2.3.1 / 5.2.3.2.
- */
 export const IZ_COPPER_XLPE_3PHASE: Record<number, { B1: number; B2: number; C: number; E: number }> = {
   1.5: { B1: 17.5, B2: 16.5, C: 19.5, E: 22 },
   2.5: { B1: 24, B2: 23, C: 27, E: 30 },
@@ -37,10 +30,6 @@ export const IZ_COPPER_XLPE_3PHASE: Record<number, { B1: number; B2: number; C: 
   300: { B1: 477, B2: 401, C: 530, E: 576 },
 };
 
-/**
- * Resistenza chilometrica R' (Ohm/km a 70°C) e Reattanza chilometrica X' (Ohm/km)
- * per cavi Cu trifase.
- */
 export const CABLE_IMPEDANCE_COPPER: Record<number, { rOhmPerKm: number; xOhmPerKm: number }> = {
   1.5: { rOhmPerKm: 14.8, xOhmPerKm: 0.115 },
   2.5: { rOhmPerKm: 8.9, xOhmPerKm: 0.105 },
@@ -60,9 +49,6 @@ export const CABLE_IMPEDANCE_COPPER: Record<number, { rOhmPerKm: number; xOhmPer
   300: { rOhmPerKm: 0.075, xOhmPerKm: 0.074 },
 };
 
-/**
- * Diametro esterno indicativo dei cavi tipo TT-CLD / CH-N07 (mm)
- */
 export const CABLE_OUTER_DIAMETER_MM: Record<number, number> = {
   1.5: 10.5,
   2.5: 12.2,
@@ -82,15 +68,11 @@ export const CABLE_OUTER_DIAMETER_MM: Record<number, number> = {
   300: 84.0,
 };
 
-/**
- * Tubi protettivi corrugati tipo KRFWG / KRF (serie standard svizzera EN 61386)
- * diametro esterno (DE) e diametro interno effettivo (DI in mm).
- */
 export interface ConduitSpec {
   name: string;
   outerDiameterMm: number;
   innerDiameterMm: number;
-  maxUsefulAreaMm2: number; // 40% dell'area interna secondo NIBT
+  maxUsefulAreaMm2: number;
 }
 
 export const SWISS_CONDUITS_KRFWG: ConduitSpec[] = [
@@ -106,10 +88,15 @@ export const SWISS_CONDUITS_KRFWG: ConduitSpec[] = [
   { name: 'KRFWG M110', outerDiameterMm: 110, innerDiameterMm: 94.0, maxUsefulAreaMm2: (Math.PI * (94.0 / 2) ** 2) * 0.40 },
 ];
 
-/**
- * Tabella NIBT 3.1.2 - Coefficiente di contemporaneità (ks) per abitazioni residenziali
- * con cucina elettrica e senza riscaldamento elettrico diretto.
- */
+// Tabella tubi in Polietilene (PE) per linee di entrata e allacciamento interrato HAK -> HVD
+export const SWISS_CONDUITS_PE: ConduitSpec[] = [
+  { name: 'PE 80', outerDiameterMm: 80, innerDiameterMm: 68.0, maxUsefulAreaMm2: (Math.PI * (68.0 / 2) ** 2) * 0.40 },
+  { name: 'PE 100', outerDiameterMm: 100, innerDiameterMm: 86.0, maxUsefulAreaMm2: (Math.PI * (86.0 / 2) ** 2) * 0.40 },
+  { name: 'PE 120', outerDiameterMm: 120, innerDiameterMm: 103.0, maxUsefulAreaMm2: (Math.PI * (103.0 / 2) ** 2) * 0.40 },
+  { name: 'PE 150', outerDiameterMm: 150, innerDiameterMm: 129.0, maxUsefulAreaMm2: (Math.PI * (129.0 / 2) ** 2) * 0.40 },
+  { name: 'PE 200', outerDiameterMm: 200, innerDiameterMm: 172.0, maxUsefulAreaMm2: (Math.PI * (172.0 / 2) ** 2) * 0.40 },
+];
+
 export const NIBT_SIMULTANEITY_TABLE_RESIDENTIAL: { count: number; ks: number }[] = [
   { count: 1, ks: 1.00 },
   { count: 2, ks: 0.80 },
@@ -136,21 +123,39 @@ export const NIBT_SIMULTANEITY_TABLE_RESIDENTIAL: { count: number; ks: number }[
 ];
 
 /**
- * Calcola il fattore di contemporaneità esatto per appartamenti residenziali.
- * Se n coincide con un valore in tabella usa il valore tabellare NIBT,
- * altrimenti effettua interpolazione lineare tra i nodi più vicini.
+ * Tabella PAE - Corrente nominale minima del sezionatore di allacciamento
  */
+export const PAE_MIN_HAK_RATINGS: { minApt: number; maxApt: number; minInA: number }[] = [
+  { minApt: 1, maxApt: 1, minInA: 25 },
+  { minApt: 2, maxApt: 3, minInA: 40 },
+  { minApt: 4, maxApt: 9, minInA: 63 },
+  { minApt: 10, maxApt: 15, minInA: 80 },
+  { minApt: 16, maxApt: 21, minInA: 100 },
+  { minApt: 22, maxApt: 30, minInA: 125 },
+  { minApt: 31, maxApt: 40, minInA: 160 },
+  { minApt: 41, maxApt: 60, minInA: 200 },
+  { minApt: 61, maxApt: 100, minInA: 250 },
+];
+
+export function getPaeminHakRating(apartmentsCount: number): number {
+  if (apartmentsCount <= 0) return 25;
+  for (const row of PAE_MIN_HAK_RATINGS) {
+    if (apartmentsCount >= row.minApt && apartmentsCount <= row.maxApt) {
+      return row.minInA;
+    }
+  }
+  return 315;
+}
+
 export function getSimultaneityFactorResidential(apartmentsCount: number): number {
   if (apartmentsCount <= 0) return 1.0;
   if (apartmentsCount === 1) return 1.0;
 
   const table = NIBT_SIMULTANEITY_TABLE_RESIDENTIAL;
   if (apartmentsCount >= table[table.length - 1].count) {
-    // Formula asintotica NIBT per complessi molto grandi
     return Math.max(0.16, Number((0.14 + 0.80 / Math.sqrt(apartmentsCount)).toFixed(3)));
   }
 
-  // Cerca intervallo tabellare
   for (let i = 0; i < table.length - 1; i++) {
     const curr = table[i];
     const next = table[i + 1];
@@ -158,7 +163,6 @@ export function getSimultaneityFactorResidential(apartmentsCount: number): numbe
     if (apartmentsCount === next.count) return next.ks;
 
     if (apartmentsCount > curr.count && apartmentsCount < next.count) {
-      // Interpolazione lineare
       const ratio = (apartmentsCount - curr.count) / (next.count - curr.count);
       const interpolated = curr.ks + ratio * (next.ks - curr.ks);
       return Number(interpolated.toFixed(3));
@@ -168,10 +172,6 @@ export function getSimultaneityFactorResidential(apartmentsCount: number): numbe
   return 0.22;
 }
 
-/**
- * Fattore di correzione per temperatura ambiente fT (NIBT Tabella 5.2.5)
- * per cavi XLPE (temperatura ammissibile conduttore 90°C)
- */
 export function getTemperatureCorrectionFactor(tempC: number): number {
   if (tempC <= 10) return 1.15;
   if (tempC <= 15) return 1.12;
@@ -187,9 +187,6 @@ export function getTemperatureCorrectionFactor(tempC: number): number {
   return 0.65;
 }
 
-/**
- * Fattore di correzione per raggruppamento circuiti fr (NIBT Tabella 5.2.6)
- */
 export function getGroupingCorrectionFactor(circuitCount: number): number {
   if (circuitCount <= 1) return 1.00;
   if (circuitCount === 2) return 0.80;
@@ -199,12 +196,9 @@ export function getGroupingCorrectionFactor(circuitCount: number): number {
   if (circuitCount === 6) return 0.57;
   if (circuitCount === 7) return 0.54;
   if (circuitCount === 8) return 0.52;
-  return 0.50; // 9 o più circuiti
+  return 0.50;
 }
 
-/**
- * Seleziona la taglia nominale standard di protezione In (A) tale che In >= Ib
- */
 export function selectNominalProtectionRating(designCurrentIb: number): number {
   for (const rating of STANDARD_PROTECTION_RATINGS_A) {
     if (rating >= designCurrentIb) {

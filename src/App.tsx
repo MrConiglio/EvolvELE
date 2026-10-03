@@ -29,7 +29,7 @@ const INITIAL_RESIDENTIAL_DATA: ResidentialProjectData = {
   blocks: [
     {
       id: 'block-1',
-      name: 'Blocco A (Scala 1)',
+      name: 'Blocco A ',
       apartmentsCount: 8,
       apartmentBreakerA: 25, // Default 25A
       feederSectionMm2: 6, // 5x6 mm²
@@ -38,7 +38,7 @@ const INITIAL_RESIDENTIAL_DATA: ResidentialProjectData = {
     },
     {
       id: 'block-2',
-      name: 'Blocco B (Scala 2)',
+      name: 'Blocco B ',
       apartmentsCount: 8,
       apartmentBreakerA: 25, // Default 25A
       feederSectionMm2: 6, // 5x6 mm²

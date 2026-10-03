@@ -13,32 +13,29 @@ import {
   IZ_COPPER_XLPE_3PHASE,
   CABLE_IMPEDANCE_COPPER,
   CABLE_OUTER_DIAMETER_MM,
-  SWISS_CONDUITS_KRFWG,
+  SWISS_CONDUITS_PE,
   STANDARD_CABLE_SECTIONS_MM2,
   getSimultaneityFactorResidential,
+  getPaeminHakRating,
   getTemperatureCorrectionFactor,
   getGroupingCorrectionFactor,
   selectNominalProtectionRating,
 } from './nibt-standards';
 import type { ConduitSpec } from './nibt-standards';
 
-const VOLTAGE_UN_VOLTS = 400; // Tensione nominale concatenata 400 V trifase
+const VOLTAGE_UN_VOLTS = 400;
 const SQRT3 = Math.sqrt(3);
 
-/**
- * Seleziona il tubo protettivo KRFWG ottimale per un dato cavo esterno
- * garantendo che l'area occupata dal cavo sia <= 40% dell'area interna del tubo.
- */
 export function sizeConduitForCable(cableDiameterMm: number): {
   conduit: ConduitSpec;
   fillingRatioPercent: number;
 } {
   const cableAreaMm2 = Math.PI * (cableDiameterMm / 2) ** 2;
 
-  for (const conduit of SWISS_CONDUITS_KRFWG) {
+  for (const conduit of SWISS_CONDUITS_PE) {
     const innerArea = Math.PI * (conduit.innerDiameterMm / 2) ** 2;
     const ratio = (cableAreaMm2 / innerArea) * 100;
-    if (conduit.innerDiameterMm > cableDiameterMm && ratio <= 45.0) {
+    if (conduit.innerDiameterMm > cableDiameterMm && ratio <= 40.0) {
       return {
         conduit,
         fillingRatioPercent: Number(ratio.toFixed(1)),
@@ -46,21 +43,9 @@ export function sizeConduitForCable(cableDiameterMm: number): {
     }
   }
 
-  const largest = SWISS_CONDUITS_KRFWG[SWISS_CONDUITS_KRFWG.length - 1];
+  const largest = SWISS_CONDUITS_PE[SWISS_CONDUITS_PE.length - 1];
   const innerArea = Math.PI * (largest.innerDiameterMm / 2) ** 2;
   const ratio = Number(((cableAreaMm2 / innerArea) * 100).toFixed(1));
-
-  if (ratio > 45.0) {
-    return {
-      conduit: {
-        name: 'Passerella Forata / Canale BKS (posa cavo pesante)',
-        outerDiameterMm: 150,
-        innerDiameterMm: 120,
-        maxUsefulAreaMm2: 5000,
-      },
-      fillingRatioPercent: 30.0,
-    };
-  }
 
   return {
     conduit: largest,
@@ -68,9 +53,6 @@ export function sizeConduitForCable(cableDiameterMm: number): {
   };
 }
 
-/**
- * Dimensionamento conduttore principale e verifica portata (Iz) e caduta di tensione (ΔU)
- */
 export function sizeMainCableAndConduit({
   designCurrentIb,
   protectionIn,
@@ -93,7 +75,6 @@ export function sizeMainCableAndConduit({
   const fT = getTemperatureCorrectionFactor(ambientTempC);
   const fr = getGroupingCorrectionFactor(groupedCircuits);
   const totalCorrection = Number((fT * fr).toFixed(3));
-
   const sinPhi = Math.sin(Math.acos(Math.min(1.0, Math.max(0.1, cosPhi))));
 
   let chosenSection = STANDARD_CABLE_SECTIONS_MM2[0];
@@ -110,10 +91,8 @@ export function sizeMainCableAndConduit({
     const correctedIz = rawIz * totalCorrection;
 
     const impedance = CABLE_IMPEDANCE_COPPER[section] || { rOhmPerKm: 0.1, xOhmPerKm: 0.08 };
-    const rKm = impedance.rOhmPerKm;
-    const xKm = impedance.xOhmPerKm;
-    const rTotal = (rKm * lengthM) / 1000;
-    const xTotal = (xKm * lengthM) / 1000;
+    const rTotal = (impedance.rOhmPerKm * lengthM) / 1000;
+    const xTotal = (impedance.xOhmPerKm * lengthM) / 1000;
 
     const dU = SQRT3 * designCurrentIb * (rTotal * cosPhi + xTotal * sinPhi);
     const dUPercent = (dU / VOLTAGE_UN_VOLTS) * 100;
@@ -124,20 +103,13 @@ export function sizeMainCableAndConduit({
     deltaUVolts = Number(dU.toFixed(2));
     deltaUPercent = Number(dUPercent.toFixed(2));
 
-    const satisfiesCurrent = correctedIz >= protectionIn;
-    const satisfiesDrop = dUPercent <= maxAllowedVoltageDropPercent;
-
-    if (satisfiesCurrent && satisfiesDrop) {
+    if (correctedIz >= protectionIn && dUPercent <= maxAllowedVoltageDropPercent) {
       break;
     }
   }
 
   const cableOuterDiameterMm = CABLE_OUTER_DIAMETER_MM[chosenSection] || 25;
   const conduitResult = sizeConduitForCable(cableOuterDiameterMm);
-
-  const isCurrentCompliant = cableIzCorrected >= protectionIn && protectionIn >= designCurrentIb;
-  const isVoltageDropCompliant = deltaUPercent <= maxAllowedVoltageDropPercent;
-  const isConduitCompliant = conduitResult.fillingRatioPercent <= 45.0;
 
   return {
     sectionMm2: chosenSection,
@@ -148,118 +120,130 @@ export function sizeMainCableAndConduit({
     totalCorrection,
     deltaUVolts,
     deltaUPercent,
-    isCurrentCompliant,
-    isVoltageDropCompliant,
+    isCurrentCompliant: cableIzCorrected >= protectionIn && protectionIn >= designCurrentIb,
+    isVoltageDropCompliant: deltaUPercent <= maxAllowedVoltageDropPercent,
     cableOuterDiameterMm,
     conduitSpec: conduitResult.conduit,
     conduitFillingRatioPercent: conduitResult.fillingRatioPercent,
-    isConduitCompliant,
+    isConduitCompliant: conduitResult.fillingRatioPercent <= 40.0,
   };
 }
 
-/**
- * Calcolo completo impianto RESIDENZIALE, COMMERCIALE o MISTO
- */
 export function calculateResidentialProject(data: ResidentialProjectData): SizingResult {
   const steps: SizingResult['stepByStepFormulas'] = [];
 
   let totalApartments = 0;
   let totalApartmentsNominalPowerKw = 0;
   let totalCommercialPowerKw = 0;
+  let commercialDirectIbSum = 0;
   const blocksDetails: NonNullable<SizingResult['apartmentsSummary']>['blocksDetails'] = [];
 
-  // Potenza convenzionale globale di default per appartamento (es. 5.5 kW)
   const globalDefaultAptKw = data.defaultAptPowerKw || 5.5;
 
-  for (const block of data.blocks) {
-    let blockActivePowerKw = 0;
-    let blockApparentKva = 0;
-    let blockIb = 0;
+  if (data.blocks && Array.isArray(data.blocks)) {
+    for (const block of data.blocks) {
+      const blockCosPhi = block.cosPhi || 0.95;
+      const feederLen = 15;
 
-    // Gestione parte residenziale del blocco
-    if (block.blockType === 'residential' || block.blockType === 'mixed') {
-      if (block.apartmentsCount > 0) {
-        totalApartments += block.apartmentsCount;
-        const aptPowerKw = block.customAptPowerKw ?? globalDefaultAptKw;
-        totalApartmentsNominalPowerKw += block.apartmentsCount * aptPowerKw;
+      // 1. GESTIONE UNITÀ COMMERCIALE
+      if (block.blockType === 'commercial') {
+        const customIn = block.apartmentBreakerA && block.apartmentBreakerA > 25 ? block.apartmentBreakerA : 63;
+        const blockCommercialKw = Number(( (customIn * VOLTAGE_UN_VOLTS * SQRT3 * blockCosPhi) / 1000 * 0.7 ).toFixed(2));
+        
+        totalCommercialPowerKw += blockCommercialKw;
+        commercialDirectIbSum += customIn;
 
-        const blockKs = getSimultaneityFactorResidential(block.apartmentsCount);
-        const aptSimPowerKw = block.apartmentsCount * aptPowerKw * blockKs;
-        blockActivePowerKw += aptSimPowerKw;
+        const blockIb = Number(( (blockCommercialKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * blockCosPhi) ).toFixed(1));
+        const selectedFeederSec = block.feederSectionMm2 || 16;
+
+        const imp = CABLE_IMPEDANCE_COPPER[selectedFeederSec] || CABLE_IMPEDANCE_COPPER[16];
+        const rTot = (imp.rOhmPerKm * feederLen) / 1000;
+        const xTot = (imp.xOhmPerKm * feederLen) / 1000;
+        const sinPhi = Math.sin(Math.acos(blockCosPhi));
+        const dU = SQRT3 * blockIb * (rTot * blockCosPhi + xTot * sinPhi);
+        const dUPercent = Number(((dU / VOLTAGE_UN_VOLTS) * 100).toFixed(2));
+
+        blocksDetails.push({
+          blockId: block.id,
+          blockName: `${block.name} (Commerciale)`,
+          apartmentsCount: 0,
+          blockIb,
+          recommendedIn: customIn,
+          feederSectionMm2: selectedFeederSec,
+          feederVoltageDropPercent: dUPercent,
+          feederConduit: sizeConduitForCable(CABLE_OUTER_DIAMETER_MM[selectedFeederSec] || 25).conduit.name,
+        });
+        continue;
+      }
+
+      // 2. GESTIONE BLOCCO RESIDENZIALE O MISTO
+      const aptCount = block.apartmentsCount || 0;
+      const aptPowerKw = block.customAptPowerKw ?? globalDefaultAptKw;
+      const feederSec = block.feederSectionMm2 || 6;
+      
+      if (aptCount > 0) {
+        totalApartments += aptCount;
+        const blockNominalKw = aptCount * aptPowerKw;
+        totalApartmentsNominalPowerKw += blockNominalKw;
+
+        const blockKs = getSimultaneityFactorResidential(aptCount);
+        const blockActivePowerKw = blockNominalKw * blockKs;
+
+        const blockIb = Number(((blockActivePowerKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * blockCosPhi)).toFixed(1));
+        const blockIn = selectNominalProtectionRating(blockIb);
+
+        const imp = CABLE_IMPEDANCE_COPPER[feederSec] || CABLE_IMPEDANCE_COPPER[6];
+        const rTot = (imp.rOhmPerKm * feederLen) / 1000;
+        const xTot = (imp.xOhmPerKm * feederLen) / 1000;
+        const sinPhi = Math.sin(Math.acos(blockCosPhi));
+        const dU = SQRT3 * blockIb * (rTot * blockCosPhi + xTot * sinPhi);
+        const dUPercent = Number(((dU / VOLTAGE_UN_VOLTS) * 100).toFixed(2));
+
+        const outerD = CABLE_OUTER_DIAMETER_MM[feederSec] || 15.8;
+        const blockConduit = sizeConduitForCable(outerD).conduit.name;
+
+        blocksDetails.push({
+          blockId: block.id,
+          blockName: block.name,
+          apartmentsCount: aptCount,
+          blockIb,
+          recommendedIn: blockIn,
+          feederSectionMm2: feederSec,
+          feederVoltageDropPercent: dUPercent,
+          feederConduit: blockConduit,
+        });
       }
     }
-
-    // Gestione parte commerciale del blocco
-    if ((block.blockType === 'commercial' || block.blockType === 'mixed') && block.commercialUnits) {
-      for (const unit of block.commercialUnits) {
-        totalCommercialPowerKw += unit.installedPowerKw;
-        // Per il commerciale applichiamo un fattore di contemporaneità tipico del terziario (es. 0.75) o diretto
-        const commKs = 0.75; 
-        blockActivePowerKw += unit.installedPowerKw * commKs;
-      }
-    }
-
-    // Calcolo corrente montante di blocco
-    blockIb = Number(
-      (
-        (blockActivePowerKw * 1000) /
-        (SQRT3 * VOLTAGE_UN_VOLTS * (block.cosPhi || 0.98))
-      ).toFixed(1)
-    );
-    const blockIn = selectNominalProtectionRating(blockIb);
-
-    // Caduta di tensione montante di blocco
-    const imp = CABLE_IMPEDANCE_COPPER[block.feederSectionMm2] || CABLE_IMPEDANCE_COPPER[6];
-    const rTot = (imp.rOhmPerKm * block.feederLengthM) / 1000;
-    const xTot = (imp.xOhmPerKm * block.feederLengthM) / 1000;
-    const sinPhi = Math.sin(Math.acos(block.cosPhi || 0.98));
-    const dU = SQRT3 * blockIb * (rTot * (block.cosPhi || 0.98) + xTot * sinPhi);
-    const dUPercent = Number(((dU / VOLTAGE_UN_VOLTS) * 100).toFixed(2));
-
-    const outerD = CABLE_OUTER_DIAMETER_MM[block.feederSectionMm2] || 15.8;
-    const blockConduit = sizeConduitForCable(outerD).conduit.name;
-
-    blocksDetails.push({
-      blockId: block.id,
-      blockName: block.name,
-      apartmentsCount: block.apartmentsCount,
-      blockIb,
-      recommendedIn: blockIn,
-      feederSectionMm2: block.feederSectionMm2,
-      feederVoltageDropPercent: dUPercent,
-      feederConduit: blockConduit,
-    });
   }
 
   // Contemporaneità globale per tutti gli appartamenti
   const globalAptKs = getSimultaneityFactorResidential(totalApartments);
   const aptSimultaneousPowerKw = Number((totalApartmentsNominalPowerKw * globalAptKs).toFixed(2));
   
-  // Somma totale attiva: Appartamenti simultanei + Commerciale stimato + Servizi Comuni
-  const cs = data.commonServices;
+  // Servizi Comuni
+  const cs = data.commonServices || {
+    heatPumpKw: 0,
+    heatPumpAuxHeaterKw: 0,
+    liftKw: 0,
+    lightingKw: 0,
+    pumpsKw: 0,
+    ventilationKw: 0,
+    miscellaneousKw: 0,
+    reservePercent: 20,
+  };
+
   const commonBaseKw =
-    cs.heatPumpKw +
-    cs.heatPumpAuxHeaterKw +
-    cs.liftKw +
-    cs.lightingKw +
-    cs.pumpsKw +
-    cs.ventilationKw +
-    cs.miscellaneousKw;
+    (cs.heatPumpKw || 0) +
+    (cs.heatPumpAuxHeaterKw || 0) +
+    (cs.liftKw || 0) +
+    (cs.lightingKw || 0) +
+    (cs.pumpsKw || 0) +
+    (cs.ventilationKw || 0) +
+    (cs.miscellaneousKw || 0);
 
-  const reserveKw = Number(((commonBaseKw * cs.reservePercent) / 100).toFixed(2));
+  const reservePct = cs.reservePercent ?? 20;
+  const reserveKw = Number(((commonBaseKw * reservePct) / 100).toFixed(2));
   const commonWithReserveKw = Number((commonBaseKw + reserveKw).toFixed(2));
-
-  // STEP FORMULE REPORT
-  if (totalApartments > 0) {
-    steps.push({
-      title: 'Contemporaneità Appartamenti (NIBT 3.1.2)',
-      description: `Calcolo del coefficiente di contemporaneità per n. ${totalApartments} appartamenti totali.`,
-      formula: `k_s = f(N_{apt}) \\text{ da Tabella NIBT 3.1.2}`,
-      valuesApplied: `N = ${totalApartments} appartamenti \\implies k_s = ${globalAptKs}`,
-      result: `k_s = ${globalAptKs}`,
-      nibtRef: 'NIBT Tabella 3.1.2',
-    });
-  }
 
   // Mobilità Elettrica (EV)
   let evInstalledKw = 0;
@@ -267,10 +251,9 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
   let evSimultaneityFactor = 1.0;
   let evCurrentA = 0;
 
-  if (data.evCharging.enabled && data.evCharging.stationCount > 0) {
+  if (data.evCharging?.enabled && (data.evCharging.stationCount || 0) > 0) {
     const ev = data.evCharging;
     evInstalledKw = ev.stationCount * ev.stationPowerKw;
-
     if (ev.managementType === 'none') {
       evSimultaneityFactor = ev.stationCount > 4 ? 0.8 : 1.0;
       evActiveDemandKw = Number((evInstalledKw * evSimultaneityFactor).toFixed(1));
@@ -282,55 +265,54 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
       evSimultaneityFactor = Math.max(0.20, Number((0.15 + 0.60 / Math.sqrt(ev.stationCount)).toFixed(2)));
       evActiveDemandKw = Number((evInstalledKw * evSimultaneityFactor).toFixed(1));
     }
-
-    evCurrentA = Number(
-      ((evActiveDemandKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * (ev.cosPhi || 0.99))).toFixed(1)
-    );
+    evCurrentA = Number(((evActiveDemandKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * (ev.cosPhi || 0.95))).toFixed(1));
   }
 
-  // Fotovoltaico (FV) & RCP / ZEV
+  // Fotovoltaico (FV)
+  let pvMaxInfeedCurrentA = 0;
   let pvKwp = 0;
   let pvInverterKva = 0;
-  let pvMaxInfeedCurrentA = 0;
-
-  // Carico totale di prelievo lordo
-  const gridImportPeakKw = aptSimultaneousPowerKw + totalCommercialPowerKw * 0.75 + commonWithReserveKw + evActiveDemandKw;
   let hakStatus = 'Standard mono-direzionale (Prelevatore)';
 
-  if (data.photovoltaic.enabled && data.photovoltaic.inverterPowerKva > 0) {
+  if (data.photovoltaic?.enabled && (data.photovoltaic.inverterPowerKva || 0) > 0) {
     const pv = data.photovoltaic;
-    pvKwp = pv.peakPowerKwp;
-    pvInverterKva = pv.inverterPowerKva;
+    pvKwp = pv.peakPowerKwp || 0;
+    pvInverterKva = pv.inverterPowerKva || 0;
     pvMaxInfeedCurrentA = Number(((pvInverterKva * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS)).toFixed(1));
     hakStatus = pv.hasRcp ? 'Bidirezionale RCP/ZEV (Immissione e Prelievo)' : 'Impianto FV con cessione eccedenze';
   }
 
+  // CALCOLO TOTALE CORRENTE IN INTRODUZIONE / TESTACAVO (HAK)
+  const commercialActiveDemandKw = totalCommercialPowerKw;
+  const gridImportPeakKw = aptSimultaneousPowerKw + commercialActiveDemandKw + commonWithReserveKw + evActiveDemandKw;
   const totalActiveDemandKw = Number(gridImportPeakKw.toFixed(2));
-  const equivalentCosPhi = 0.96;
+  const equivalentCosPhi = 0.95;
   const totalSimultaneousApparentPowerKva = Number((totalActiveDemandKw / equivalentCosPhi).toFixed(2));
 
-  const importCurrentA = (totalActiveDemandKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * equivalentCosPhi);
-  const hakDesignCurrentIb = Number(Math.max(importCurrentA, pvMaxInfeedCurrentA).toFixed(1));
-  const protectionIn = selectNominalProtectionRating(hakDesignCurrentIb);
+  const standardImportCurrentA = (totalActiveDemandKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * equivalentCosPhi);
+  
+  // VERIFICA MINIMO PAE
+  const paeMinIn = getPaeminHakRating(totalApartments);
 
-  steps.push({
-    title: 'Corrente di Progetto Totale e Taglia Protezione Generale (HAK / HVD)',
-    description: 'Calcolo della corrente nominale di impiego (Ib) complessiva per l’edificio.',
-    formula: `I_b = \\max\\left( \\frac{P_{tot,sim}}{\\sqrt{3} \\cdot U_n \\cdot \\cos\\varphi_{eq}}, \\; I_{max,fv} \\right)`,
-    valuesApplied: `I_{import} = ${importCurrentA.toFixed(1)} \\text{ A}, \\quad I_{export} = ${pvMaxInfeedCurrentA} \\text{ A}`,
-    result: `I_b = ${hakDesignCurrentIb} \\text{ A} \\implies \\mathbf{I_n = ${protectionIn} \\text{ A}}`,
-    nibtRef: 'NIBT Capitolo 4.3 & 5.2',
-  });
+  const analyticalOrCommercialIb = Math.max(standardImportCurrentA, commercialDirectIbSum > 0 ? commercialDirectIbSum * 0.75 : 0, pvMaxInfeedCurrentA);
+  const hakDesignCurrentIb = Number(Math.max(analyticalOrCommercialIb, commercialDirectIbSum > 0 ? commercialDirectIbSum : 0).toFixed(1));
+
+  let protectionIn = selectNominalProtectionRating(hakDesignCurrentIb);
+  if (totalApartments > 0 && commercialDirectIbSum === 0) {
+    protectionIn = Math.max(protectionIn, paeMinIn);
+  } else if (commercialDirectIbSum > 0) {
+    protectionIn = Math.max(protectionIn, commercialDirectIbSum);
+  }
 
   const cableSizing = sizeMainCableAndConduit({
     designCurrentIb: hakDesignCurrentIb,
     protectionIn,
-    lengthM: data.serviceCableLengthM,
-    installationMethod: data.installationMethod,
-    ambientTempC: data.ambientTempC,
-    groupedCircuits: data.groupedCircuits,
+    lengthM: data.serviceCableLengthM || 15,
+    installationMethod: data.installationMethod || 'B2',
+    ambientTempC: data.ambientTempC || 30,
+    groupedCircuits: data.groupedCircuits || 1,
     cosPhi: equivalentCosPhi,
-    maxAllowedVoltageDropPercent: data.maxAllowedVoltageDropPercent,
+    maxAllowedVoltageDropPercent: data.maxAllowedVoltageDropPercent || 1.5,
   });
 
   const totalInstalledPowerKw = totalApartmentsNominalPowerKw + totalCommercialPowerKw + commonBaseKw + evInstalledKw;
@@ -348,7 +330,7 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
     protectionType: protectionIn > 125 ? 'Fusibili a coltello NH (Gr. 1/2) o Interruttore Scatolato MCCB' : 'Fusibili NH00 o Interruttore Magnetotermico MCB',
 
     recommendedCableSectionMm2: cableSizing.sectionMm2,
-    cableDescription: `Cavo Cu 5G${cableSizing.sectionMm2} mm² XLPE (tipo TT-CLD / CH-N07V)`,
+    cableDescription: `Cavo Cu 5G${cableSizing.sectionMm2} mm² XLPE`,
     cableIzRaw: cableSizing.cableIzRaw,
     correctionFactors: {
       temperature: cableSizing.fT,
@@ -361,13 +343,13 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
     voltageDropVolts: cableSizing.deltaUVolts,
     voltageDropPercent: cableSizing.deltaUPercent,
     isVoltageDropCompliant: cableSizing.isVoltageDropCompliant,
-    maxAllowedVoltageDropPercent: data.maxAllowedVoltageDropPercent,
+    maxAllowedVoltageDropPercent: data.maxAllowedVoltageDropPercent || 1.5,
 
     cableOuterDiameterMm: cableSizing.cableOuterDiameterMm,
     recommendedConduitSize: cableSizing.conduitSpec.name,
     conduitInnerDiameterMm: cableSizing.conduitSpec.innerDiameterMm,
     conduitFillingRatioPercent: cableSizing.conduitFillingRatioPercent,
-    isConduitCompliant: cableSizing.isConduitCompliant,
+    isConduitCompliant: cableSizing.conduitCompliant,
 
     apartmentsSummary: {
       totalApartments,
@@ -382,18 +364,18 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
       reserveKw,
       currentA: Number(((commonWithReserveKw * 1000) / (SQRT3 * VOLTAGE_UN_VOLTS * 0.88)).toFixed(1)),
     },
-    evSummary: data.evCharging.enabled ? {
+    evSummary: data.evCharging?.enabled ? {
       installedKw: evInstalledKw,
       activeDemandKw: evActiveDemandKw,
       simultaneityFactor: evSimultaneityFactor,
       currentA: evCurrentA,
     } : undefined,
-    pvSummary: data.photovoltaic.enabled ? {
+    pvSummary: data.photovoltaic?.enabled ? {
       peakPowerKwp: pvKwp,
       inverterPowerKva: pvInverterKva,
       maxInfeedCurrentA: pvMaxInfeedCurrentA,
       hakBidirectionalStatus: hakStatus,
-      gridImportPeakIb: Number(importCurrentA.toFixed(1)),
+      gridImportPeakIb: Number(hakDesignCurrentIb.toFixed(1)),
       gridExportPeakIb: pvMaxInfeedCurrentA,
     } : undefined,
 
@@ -401,10 +383,6 @@ export function calculateResidentialProject(data: ResidentialProjectData): Sizin
   };
 }
 
-/**
- * Calcolo completo impianto INDUSTRIALE (Invariato per compatibilità)
- */
 export function calculateIndustrialProject(data: IndustrialProjectData): SizingResult {
-  // Mantiene la logica industriale pulita esistente
-  return {} as SizingResult; 
+  return {} as SizingResult;
 }
