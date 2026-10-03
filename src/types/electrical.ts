@@ -10,11 +10,13 @@ export interface ApartmentBlock {
   customAptPowerKw?: number;
   apartmentBreakerA?: number;
   feederSectionMm2?: number;
+  feederLengthM?: number;
   cosPhi?: number;
 }
 
 export interface CommonServicesData {
   heatPumpKw: number;
+  heatPumpCosPhi?: number;
   heatPumpAuxHeaterKw: number;
   liftKw: number;
   lightingKw: number;
@@ -38,11 +40,13 @@ export interface PhotovoltaicData {
   peakPowerKwp: number;
   inverterPowerKva: number;
   hasRcp: boolean;
+  batteryStorageKwh?: number;
 }
 
 export interface ResidentialProjectData {
   projectName: string;
   engineerName: string;
+  gridOperator: string;
   dsoName: string;
   installationMethod: 'B1' | 'B2' | 'C' | 'E';
   ambientTempC: number;
@@ -59,25 +63,33 @@ export interface ResidentialProjectData {
 export interface IndustrialLoadItem {
   id: string;
   name: string;
+  category?: 'production' | 'motor' | 'hvac' | 'lighting' | 'it_office';
   nominalPowerKw: number;
   cosPhi: number;
   efficiency: number;
   quantity: number;
   isMotor: boolean;
+  utilizationFactorKu?: number;
+  simultaneityFactorKs?: number;
 }
 
 export interface IndustrialProjectData {
   projectName: string;
   engineerName: string;
+  gridOperator: string;
   dsoName: string;
   installationMethod: 'B1' | 'B2' | 'C' | 'E';
   ambientTempC: number;
   groupedCircuits: number;
   serviceCableLengthM: number;
   maxAllowedVoltageDropPercent: number;
+  expansionReservePercent?: number;
+  hasPfcCorrection?: boolean;
   loads: IndustrialLoadItem[];
   hasPfc: boolean;
   targetCosPhi: number;
+  evCharging?: EvChargingData;
+  photovoltaic?: PhotovoltaicData;
 }
 
 export interface SizingResult {
@@ -166,5 +178,6 @@ export interface SizingResult {
     nibtRef: string;
     formula: string;
     result: string;
+    valuesApplied?: string;
   }[];
 }
